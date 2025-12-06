@@ -1,0 +1,24 @@
+name: medallion_dbt
+version: 1.0.0
+config-version: 2
+
+profile: medallion_duckdb
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+analysis-paths: ["analysis"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  clean_dir: "{{ env_var('CLEAN_DIR', project_root ~ '/data/clean') }}"
+  ds_nodash: "{{ env_var('DS_NODASH', modules.datetime.datetime.utcnow().strftime('%Y%m%d')) }}"
+
+models:
+  medallion_dbt:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

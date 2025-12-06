@@ -1,0 +1,8 @@
+medallion_duckdb:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '/home/w1ndman/laboral/examen_ing_de_sw_n_data/warehouse/medallion.duckdb') }}"
+      threads: 4
+      extensions: ["parquet"]

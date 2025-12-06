@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: "Cleaned bronze file, one row per transaction ready for downstream marts."
+    columns:
+      - name: transaction_id
+        description: "Unique identifier for the transaction."
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        description: "Customer linked to the transaction."
+        tests:
+          - not_null
+      - name: amount
+        description: "Monetary amount of the transaction in the raw currency."
+        tests:
+          - not_null
+          - non_negative
+      - name: status
+        description: "Normalized status flag from the source system."
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - completed
+                - pending
+                - failed
+      - name: transaction_ts
+        description: "Event timestamp of the transaction."
+        tests:
+          - not_null
+      - name: transaction_date
+        description: "Date component derived from transaction_ts for partitioning/grouping."
+        tests:
+          - not_null

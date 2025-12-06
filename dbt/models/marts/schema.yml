@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: fct_customer_transactions
+    description: "Aggregated customer level metrics derived from cleaned transactions."
+    columns:
+      - name: customer_id
+        description: "Unique id per customer."
+        tests:
+          - not_null
+      - name: transaction_count
+        description: "Number of transactions per customer."
+        tests:
+          - not_null
+          - non_negative
+      - name: total_amount_completed
+        description: "Sum of completed transaction amounts."
+        tests:
+          - not_null
+          - non_negative
+      - name: total_amount_all
+        description: "Sum of all transaction amounts."
+        tests:
+          - not_null
+          - non_negative
