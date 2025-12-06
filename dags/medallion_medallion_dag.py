@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pendulum
 from airflow import DAG
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.operators.python import PythonOperator
 
 # pylint: disable=import-error,wrong-import-position
@@ -65,9 +65,57 @@ def _run_dbt_command(command: str, ds_nodash: str) -> subprocess.CompletedProces
     )
 
 
-# TODO: Definir las funciones necesarias para cada etapa del pipeline
-#  (bronze, silver, gold) usando las funciones de transformación y
-#  los comandos de dbt.
+
+def run_bronze_clean(ds_nodash: str) -> str:
+    """Genera el parquet limpio para la fecha indicada."""
+
+    execution_date = datetime.strptime(ds_nodash, "%Y%m%d").date()
+    try:
+        output_path = clean_daily_transactions(
+            execution_date=execution_date,
+            raw_dir=RAW_DIR,
+            clean_dir=CLEAN_DIR,
+        )
+    except FileNotFoundError as exc:
+        raise AirflowSkipException(str(exc)) from exc
+
+    return str(output_path)
+
+
+def run_silver_models(ds_nodash: str) -> str:
+    """Ejecuta `dbt run` para materializar modelos staging/marts."""
+
+    result = _run_dbt_command("run", ds_nodash)
+    if result.returncode != 0:
+        raise AirflowException(
+            f"dbt run failed for {ds_nodash}:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+    return result.stdout
+
+
+def run_gold_tests(ds_nodash: str) -> str:
+    """Corre `dbt test`, persiste el reporte y falla si hubo errores."""
+
+    QUALITY_DIR.mkdir(parents=True, exist_ok=True)
+    result = _run_dbt_command("test", ds_nodash)
+
+    report = {
+        "ds_nodash": ds_nodash,
+        "status": "passed" if result.returncode == 0 else "failed",
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+    report_path = QUALITY_DIR / f"dq_results_{ds_nodash}.json"
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    if result.returncode != 0:
+        raise AirflowException(
+            f"dbt test failed for {ds_nodash}: see {report_path} for details."
+        )
+
+    return str(report_path)
 
 
 def build_dag() -> DAG:
@@ -81,18 +129,25 @@ def build_dag() -> DAG:
         max_active_runs=1,
     ) as medallion_dag:
 
+        bronze_clean = PythonOperator(
+            task_id="bronze_clean",
+            python_callable=run_bronze_clean,
+            op_kwargs={"ds_nodash": "{{ ds_nodash }}"},
+        )
 
-        # TODO:
-        # * Agregar las tasks necesarias del pipeline para completar lo pedido por el enunciado.
-        # * Usar PythonOperator con el argumento op_kwargs para pasar ds_nodash a las funciones.
-        #   De modo que cada task pueda trabajar con la fecha de ejecución correspondiente.
-        # Recomendaciones:
-        #  * Pasar el argumento ds_nodash a las funciones definidas arriba.
-        #    ds_nodash contiene la fecha de ejecución en formato YYYYMMDD sin guiones.
-        #    Utilizarlo para que cada task procese los datos del dia correcto y los archivos
-        #    de salida tengan nombres únicos por fecha.
-        #  * Asegurarse de que los paths usados en las funciones sean relativos a BASE_DIR.
-        #  * Usar las funciones definidas arriba para cada etapa del pipeline.
+        silver_dbt_run = PythonOperator(
+            task_id="silver_dbt_run",
+            python_callable=run_silver_models,
+            op_kwargs={"ds_nodash": "{{ ds_nodash }}"},
+        )
+
+        gold_dbt_tests = PythonOperator(
+            task_id="gold_dbt_tests",
+            python_callable=run_gold_tests,
+            op_kwargs={"ds_nodash": "{{ ds_nodash }}"},
+        )
+
+        bronze_clean >> silver_dbt_run >> gold_dbt_tests
 
 
 

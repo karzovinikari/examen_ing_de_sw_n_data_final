@@ -8,6 +8,7 @@ models:
         description: "Unique id per customer."
         tests:
           - not_null
+          - unique
       - name: transaction_count
         description: "Number of transactions per customer."
         tests:

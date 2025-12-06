@@ -54,12 +54,15 @@ def clean_daily_transactions(
     df = df.drop_duplicates()
 
     if "amount" in df.columns:
-        df["amount"] = _coerce_amount(df["amount"])
+        decimal_normalized = (
+            df["amount"].astype(str).str.replace(",", ".", regex=False)
+        )
+        df["amount"] = _coerce_amount(decimal_normalized).fillna(0)
 
     if "status" in df.columns:
         df["status"] = _normalize_status(df["status"])
 
-    df = df.dropna(subset=["transaction_id", "customer_id", "amount", "status"])
+    df = df.dropna(subset=["transaction_id", "customer_id", "status"])
 
     # Add simple derived fields for downstream dbt modeling
     if "transaction_ts" in df.columns:
