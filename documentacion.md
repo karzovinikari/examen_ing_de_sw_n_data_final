@@ -18,15 +18,6 @@ Para la primera etapa del pipeline (Bronze $\rightarrow$ Silver), implementamos 
 3.  **Persistencia:** Se guarda el resultado en formato **Parquet** en `data/clean/transactions_<YYYYMMDD>_clean.parquet`.
 4.  **Comunicación (XCom):** La tarea retorna la ruta absoluta del archivo Parquet generado. Esto se almacena automáticamente en **XCom** para que las tareas siguientes (Silver/Gold) puedan localizar el archivo sin necesidad de *hardcodear* rutas.
 
-Para la ejecución cambiamos la fecha manualmente en Airflow para que busque el archivo del dia 1/12/2025:
-
-Fecha por defecto (fecha actual):
-![alt text](image.png)
-
-Fecha para ejectuar (la de la data cruda):
-
-![alt text](image-1.png)
-
 #### Snippet de Implementación
 
 ```python
@@ -122,9 +113,9 @@ Para garantizar la calidad de los datos en la capa final (Gold), implementamos u
 1. Tests de Esquema (schema.yml)
 En el modelo fct_customer_transactions, definimos restricciones estrictas sobre la clave primaria para asegurar la integridad de la agregación.
 
-Test unique en customer_id: Dado que esta tabla presenta métricas agregadas por cliente, es fundamental garantizar que no existan filas duplicadas para un mismo customer_id.
+* Test unique en customer_id: Dado que esta tabla presenta métricas agregadas por cliente, es fundamental garantizar que no existan filas duplicadas para un mismo customer_id.
 
-Test not_null: (Ya existente) Asegura que no haya identificadores de cliente nulos.
+* Test not_null: (Ya existente) Asegura que no haya identificadores de cliente nulos.
 
 2. Test de Integridad de Negocio (Custom SQL)
 Implementamos un test de datos personalizado (tests/assert_amounts_logic.sql) para validar la coherencia de los montos calculados.
@@ -165,4 +156,4 @@ Durante el desarrollo del examen, al estar sentados al lado, Ceci y Ari trabajar
 
 Ceci fue quien realizó los pushes al repositorio con todas las implementaciones desarrolladas en conjunto, mientras que Ari realizó el push del archivo de documentación que fuimos elaborando a medida que avanzábamos en las diferentes etapas.
 
-Ambas desarrollaron el modelo inicial. Luego, durante la semana, contamos con el aporte de Fran, quien complementó el trabajo incorporando la lógica de manejo de datos históricos en la capa Silver. Esta mejora permitió construir una Golden Layer mucho más rica, completa y útil para la toma de decisiones.
+Ambas desarrollaron el modelo inicial. Luego, durante la semana, contamos con el aporte de Fran, quien complementó el trabajo incorporando la lógica de manejo de datos históricos en la capa Silver, junto con otros ajustes menores. Esta mejora permitió construir una Golden Layer mucho más rica, completa y útil para la toma de decisiones.
