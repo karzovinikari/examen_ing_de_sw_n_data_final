@@ -110,14 +110,16 @@ Esta etapa se ejecuta mediante un `BashOperator` que corre `dbt run`. Esto mater
 
 Para garantizar la calidad de los datos en la capa final (Gold), implementamos una estrategia de validación en dbt que combina tests estructurales y reglas de negocio personalizadas.
 
-1. Tests de Esquema (schema.yml)
+**1. Tests de Esquema (schema.yml)**
+   
 En el modelo fct_customer_transactions, definimos restricciones estrictas sobre la clave primaria para asegurar la integridad de la agregación.
 
 * Test unique en customer_id: Dado que esta tabla presenta métricas agregadas por cliente, es fundamental garantizar que no existan filas duplicadas para un mismo customer_id.
 
 * Test not_null: (Ya existente) Asegura que no haya identificadores de cliente nulos.
 
-2. Test de Integridad de Negocio (Custom SQL)
+**2. Test de Integridad de Negocio (Custom SQL)**
+   
 Implementamos un test de datos personalizado (tests/assert_amounts_logic.sql) para validar la coherencia de los montos calculados.
 
 Regla: El monto total de transacciones completadas (total_amount_completed) nunca puede ser mayor al monto total absoluto (total_amount_all).
@@ -155,5 +157,6 @@ Como mejora a futuro para un entorno productivo de alto volumen, proponemos las 
 Durante el desarrollo del examen, al estar sentados al lado, Ceci y Ari trabajaron de manera colaborativa, discutiendo y acordando cada decisión de implementación. El flujo de trabajo no se basó en commits intermedios ni en un uso intensivo de Git, sino en avanzar iterativamente, probando las implementaciones paso a paso en las distintas herramientas (Airflow, dbt, etc.).
 
 Ceci fue quien realizó los pushes al repositorio con todas las implementaciones desarrolladas en conjunto, mientras que Ari realizó el push del archivo de documentación que fuimos elaborando a medida que avanzábamos en las diferentes etapas.
+
 
 Ambas desarrollaron el modelo inicial. Luego, durante la semana, contamos con el aporte de Fran, quien complementó el trabajo incorporando la lógica de manejo de datos históricos en la capa Silver, junto con otros ajustes menores. Esta mejora permitió construir una Golden Layer mucho más rica, completa y útil para la toma de decisiones.
