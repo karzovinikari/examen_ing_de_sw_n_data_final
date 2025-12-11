@@ -54,9 +54,7 @@ def clean_daily_transactions(
     df = df.drop_duplicates()
 
     if "amount" in df.columns:
-        decimal_normalized = (
-            df["amount"].astype(str).str.replace(",", ".", regex=False)
-        )
+        decimal_normalized = df["amount"].astype(str).str.replace(",", ".", regex=False)
         df["amount"] = _coerce_amount(decimal_normalized).fillna(0)
 
     if "status" in df.columns:

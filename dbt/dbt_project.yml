@@ -20,5 +20,9 @@ models:
   medallion_dbt:
     staging:
       +materialized: view
+    historical:
+      +materialized: incremental
+      +unique_key: transaction_id   
+      +incremental_strategy: merge
     marts:
       +materialized: table

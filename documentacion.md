@@ -18,15 +18,6 @@ Para la primera etapa del pipeline (Bronze $\rightarrow$ Silver), implementamos 
 3.  **Persistencia:** Se guarda el resultado en formato **Parquet** en `data/clean/transactions_<YYYYMMDD>_clean.parquet`.
 4.  **Comunicación (XCom):** La tarea retorna la ruta absoluta del archivo Parquet generado. Esto se almacena automáticamente en **XCom** para que las tareas siguientes (Silver/Gold) puedan localizar el archivo sin necesidad de *hardcodear* rutas.
 
-Para la ejecución cambiamos la fecha manualmente en Airflow para que busque el archivo del dia 1/12/2025:
-
-Fecha por defecto (fecha actual):
-![alt text](image.png)
-
-Fecha para ejectuar (la de la data cruda):
-
-![alt text](image-1.png)
-
 #### Snippet de Implementación
 
 ```python
@@ -61,11 +52,19 @@ Se implementa un script de Python con **Pandas** que realiza las siguientes tran
 
 Estas transformaciones tambien manejan los casos en donde no haya archivos para un día (dentro de la función clean_daily_transactions)
 
+
+> **Nota:** 
+> Si el archivo del día no existe o viene con un nombre inesperado, la tarea de limpieza lanza un `AirflowSkipException`, lo que marca la tarea como skipped. Dado que las tareas downstream utilizan el trigger rule por defecto (`all_success`), también quedan skipeadas. Esto evita procesamientos incompletos o inconsistentes y garantiza que el DAG solo avance cuando la ingesta diaria es válida.
+
+> Desde la propia UI de Airflow es posible re-ejecutar el DAG para la fecha del archivo faltante, permitiendo cargarlo correctamente una vez que haya sido depositado. En un flujo productivo ,y dado que utilizamos una estrategia "upsert" para mantener el historial (como explicaremos mas adelante), es importante que no se procese la data de días posteriores hasta que el archivo faltante sea corregido, porque el pipeline asume una secuencia temporal completa y consistente.
+
+> Alternativamente, el data owner podría generar un archivo de reparación que incluya todas las transacciones del día faltante, considerando estados actualizados o correcciones, evitando así la dependencia estricta del archivo original.
+
 ### Capas Silver y Gold (Modelado con dbt)
 
 Una vez generado el archivo Parquet limpio en la capa Bronze, utilizamos **dbt Core** con el adaptador de DuckDB para modelar los datos, estructurando el proyecto en dos capas lógicas para cumplir con la arquitectura Medallion.
 
-#### 1. Capa Silver (Staging): `stg_transactions`
+#### 1.1. Capa Silver (Staging): `stg_transactions`
 
 El modelo `stg_transactions.sql` funciona para estandarizar técnicamente los datos provenientes del Parquet.
 
@@ -77,9 +76,25 @@ El modelo `stg_transactions.sql` funciona para estandarizar técnicamente los da
 * **Normalización:** Se asegura que el campo `status` esté uniformemente en minúsculas (refuerzo de la lógica aplicada en Bronze).
 * **Filtrado de Calidad:** Se descartan filas que aún posean valores nulos en campos críticos (IDs) que no hayan podido ser resueltos en la capa anterior.
 
+#### 1.2 Capa Silver (Historical): `hist_transactions`
+
+El modelo `hist_transactions.sql` cumple la función de almacenar y mantener el historial completo de transacciones, a diferencia del modelo stg_transactions, que solo representa una vista del archivo Parquet correspondiente al día procesado.
+
+Sus características principales son:
+
+* **Fuente:** Consume directamente la vista stg_transactions, que provee los datos ya estandarizados para la fecha específica procesada por el pipeline.
+
+* **Logica Upsert:** El modelo está configurado como incremental con estrategia merge, utilizando transaction_id como unique_key. Esto permite:
+
+    - Insertar nuevas transacciones que no existían previamente.
+
+    - Actualizar transacciones existentes cuyo contenido haya cambiado en días posteriores.
+
+* **Motivación del Enfoque:** Una alternativa habría sido leer todos los Parquet históricos cada vez que se construye la tabla FCT (por ejemplo, todo un rango de fechas). Sin embargo, este enfoque no escala bien: obliga a releer archivos constantemente y una misma transaction_id puede aparecer en varios días, lo que requiere revisar múltiples Parquets para encontrar su versión más reciente. Esto aumenta mucho el costo de operacion y el tiempo de procesamiento. El enfoque incremental con merge evita este problema al procesar solo las novedades del día y mantener la tabla histórica actualizada de manera eficiente
+
 #### 2. Capa Gold (Marts): `fct_customer_transactions`
 
-El modelo `fct_customer_transactions.sql` consume los datos ya estandarizados de `stg_transactions` para generar una tabla de hechos agregada por cliente, lista para consumo analítico.
+El modelo `fct_customer_transactions.sql` consume los datos ya estandarizados y almacenados en `hist_transactions` para generar una tabla de hechos historicos agregada por cliente, lista para consumo analítico.
 
 * **Granularidad:** Una fila por `customer_id`.
 * **Métricas Calculadas:**
@@ -95,14 +110,16 @@ Esta etapa se ejecuta mediante un `BashOperator` que corre `dbt run`. Esto mater
 
 Para garantizar la calidad de los datos en la capa final (Gold), implementamos una estrategia de validación en dbt que combina tests estructurales y reglas de negocio personalizadas.
 
-1. Tests de Esquema (schema.yml)
+**1. Tests de Esquema (schema.yml)**
+   
 En el modelo fct_customer_transactions, definimos restricciones estrictas sobre la clave primaria para asegurar la integridad de la agregación.
 
-Test unique en customer_id: Dado que esta tabla presenta métricas agregadas por cliente, es fundamental garantizar que no existan filas duplicadas para un mismo customer_id.
+* Test unique en customer_id: Dado que esta tabla presenta métricas agregadas por cliente, es fundamental garantizar que no existan filas duplicadas para un mismo customer_id.
 
-Test not_null: (Ya existente) Asegura que no haya identificadores de cliente nulos.
+* Test not_null: (Ya existente) Asegura que no haya identificadores de cliente nulos.
 
-2. Test de Integridad de Negocio (Custom SQL)
+**2. Test de Integridad de Negocio (Custom SQL)**
+   
 Implementamos un test de datos personalizado (tests/assert_amounts_logic.sql) para validar la coherencia de los montos calculados.
 
 Regla: El monto total de transacciones completadas (total_amount_completed) nunca puede ser mayor al monto total absoluto (total_amount_all).
@@ -128,17 +145,18 @@ Como mejora a futuro para un entorno productivo de alto volumen, proponemos las 
 
 * **Bronze particionado:** Persistir los archivos limpios en un formato columnar optimizado como **Parquet**, particionado físicamente por fecha (`/year=2025/month=12/day=06/`) o cliente. Esto, combinado con almacenamiento en la nube y un catálogo, habilitaría lecturas mucho más rápidas y eficientes.
 
-* **Silver incremental:** Configurar los modelos de dbt como `incremental`. Estaría bueno procesar solo los datos nuevos o modificados en cada ejecución, en lugar de reconstruir la tabla completa diariamente.
-
 * **Gold consolidado:** Enriquecer la capa de presentación expandiendo las métricas agregadas por cliente.
     * **Desglose por estado:** Calcular totales diferenciados para cada estado (`completed`, `pending`, `failed`) para permitir análisis financiero y de conversión más precisos.
     * **Métricas de ciclo de vida:** Incluir `first_transaction_date` y `last_transaction_date` para facilitar análisis.
-    * **Materialización:** Persistir estas vistas agregadas para acelerar la consulta desde herramientas de BI/Dashboards.
+
 
 * **Observabilidad y Alerting:** Evolucionar el manejo de Data Quality. En lugar de solo guardar un JSON local, enviar los resultados de los tests a un tópico de eventos o a un *bucket* versionado. Esto permitiría auditar tendencias de calidad a lo largo del tiempo y disparar alertas automáticas (via Slack, por ejemplo) ante anomalías en los datos.
 
 ### Modo de trabajo y colaboración
 
-Como estuvimos sentados al lado durante el desarrollo del examen (Ceci y Ari), el trabajo colaborativo se dio discutiendo y acordando sobre las decisiones de implementación. No fuimos trabajando con git (haciendo pushes intermedios, por ejemplo), sino que fuimos avanzando y probando lo implementado paso a paso (en Airflow, dbt, etc.).
-Ceci pushea al repositorio todas las implementaciones que hicimos, Ari pushea este archivo de documentación que fuimos contruyendo mientras avanzamos en las distintas etapas.
-Fran, desde su rol de ingeniero de datos, puede durante la semana ayudar con alguna corrección o complementando sobre lo trabajado. Ceci y Ari hicimos las veces de juniors que implementaron el modelo inicial :).
+Durante el desarrollo del examen, al estar sentados al lado, Ceci y Ari trabajaron de manera colaborativa, discutiendo y acordando cada decisión de implementación. El flujo de trabajo no se basó en commits intermedios ni en un uso intensivo de Git, sino en avanzar iterativamente, probando las implementaciones paso a paso en las distintas herramientas (Airflow, dbt, etc.).
+
+Ceci fue quien realizó los pushes al repositorio con todas las implementaciones desarrolladas en conjunto, mientras que Ari realizó el push del archivo de documentación que fuimos elaborando a medida que avanzábamos en las diferentes etapas.
+
+
+Ambas desarrollaron el modelo inicial. Luego, durante la semana, contamos con el aporte de Fran, quien complementó el trabajo incorporando la lógica de manejo de datos históricos en la capa Silver, junto con otros ajustes menores. Esta mejora permitió construir una Golden Layer mucho más rica, completa y útil para la toma de decisiones.

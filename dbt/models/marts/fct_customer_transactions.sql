@@ -1,6 +1,6 @@
 
 with base as (
-    select * from {{ ref('stg_transactions') }}
+    select * from {{ ref('hist_transactions') }}
 )
 
 , aggregates as (

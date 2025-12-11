@@ -65,7 +65,6 @@ def _run_dbt_command(command: str, ds_nodash: str) -> subprocess.CompletedProces
     )
 
 
-
 def run_bronze_clean(ds_nodash: str) -> str:
     """Genera el parquet limpio para la fecha indicada."""
 
@@ -148,8 +147,6 @@ def build_dag() -> DAG:
         )
 
         bronze_clean >> silver_dbt_run >> gold_dbt_tests
-
-
 
     return medallion_dag
 
